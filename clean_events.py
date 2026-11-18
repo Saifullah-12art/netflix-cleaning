@@ -144,6 +144,35 @@ def clean(events, catalog_ids):
     return kept, removed, log, examples
 
 
+CATALOG_COLS = ["title_name", "title_type", "primary_genre", "secondary_genre",
+                "release_date", "maturity_rating", "runtime_minutes"]
+MATURE_RATINGS = {"R", "TV-MA"}
+
+
+def join_catalog(kept, catalog):
+    """Left-join on title_id only (title_name is not unique). Add flags; drop nothing."""
+    by_id = {c["title_id"]: c for c in catalog}
+    unmatched = [r["event_id"] for r in kept if r["title_id"] not in by_id]
+    if unmatched:
+        fail(f"{len(unmatched)} kept rows did not match the catalog: {unmatched[:5]}")
+    for r in kept:
+        title = by_id[r["title_id"]]
+        for c in CATALOG_COLS:
+            r[c] = title[c]
+        event_day = parse_iso_date(r["event_datetime"], r["event_id"])
+        release_day = parse_iso_date(r["release_date"], r["title_id"])
+        r["pre_release_view"] = "true" if event_day < release_day else "false"
+        r["runtime_missing"] = "true" if r["runtime_minutes"] == "" else "false"
+        mature = r["profile_type"] == "kids" and r["maturity_rating"] in MATURE_RATINGS
+        r["kids_profile_mature_title"] = "true" if mature else "false"
+    flag_examples = {}
+    for flag in ("pre_release_view", "runtime_missing", "kids_profile_mature_title"):
+        ids = [r["event_id"] for r in kept if r[flag] == "true"]
+        flag_examples[flag] = ids[:5]
+        out(f"Flag {flag}: {len(ids):,} rows")
+    return flag_examples
+
+
 def main(argv):
     if len(argv) != 4:
         print(__doc__)
@@ -163,6 +192,9 @@ def main(argv):
     kept, removed, log, examples = clean(events, {c["title_id"] for c in catalog})
     for row in log:
         out(f"Rule {row['rule']}: {row['rows_affected']:>5,} rows  {row['action']}")
+
+    flag_examples = join_catalog(kept, catalog)
+    out(f"Joined catalog on title_id: all {len(kept):,} kept rows matched")
 
 
 if __name__ == "__main__":
