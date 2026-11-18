@@ -1,0 +1,49 @@
+Loaded 5,000 events and 300 catalog titles
+No duplicate event_id or catalog title_id
+Rule 1:   180 rows  dropped row; saved to removed_events.csv with removal_reason
+Rule 2:    69 rows  kept row; value left empty; watch_seconds_issue = "blank"
+Rule 3:    46 rows  kept row; value set to empty; watch_seconds_issue = "implausible_over_1h"
+Rule 4:    39 rows  converted to true/false (reported value kept, not recalculated); completed_suspect = true where completed is true and watch_seconds < 120 or empty
+Rule 5:   177 rows  filled with "unknown" (device_type: 132 rows, country: 47 rows)
+Flag pre_release_view: 27 rows
+Flag runtime_missing: 104 rows
+Flag kids_profile_mature_title: 46 rows
+Joined catalog on title_id: all 4,820 kept rows matched
+Split at 2026-11-10: 4,461 train, 359 holdout
+
+CHECKS
+[PASS] kept + removed = 5,000: 4,820 + 180 = 5,000
+[PASS] no event_id in both kept and removed: 0 overlapping
+[PASS] 4,820 kept, 180 removed: 4,820 kept, 180 removed
+[PASS] train = 4,461 rows, 2026-08-17 to 2026-11-09: 4,461 rows, 2026-08-17 to 2026-11-09
+[PASS] holdout = 359 rows, 2026-11-10 to 2026-11-16: 359 rows, 2026-11-10 to 2026-11-16
+[PASS] latest train date is before earliest holdout date: 2026-11-09 < 2026-11-10
+[PASS] split values are exactly "train" and "holdout": ['holdout', 'train']
+[PASS] every holdout member appears in train: 0 holdout-only members []
+[PASS] every holdout title appears in train: 0 holdout-only titles []
+[PASS] no watch_seconds over 3,600: 0 rows over
+[PASS] no blank device_type or country left: 0 rows blank
+
+Wrote events_clean.csv, train.csv, holdout.csv, removed_events.csv, cleaning_log.csv to data/clean/
+
+CLEANING LOG
+  Rule 1 |  180 rows | title_id not in catalog (TT-0347, TT-0412, TT-0588)
+         action: dropped row; saved to removed_events.csv with removal_reason
+  Rule 2 |   69 rows | watch_seconds blank
+         action: kept row; value left empty; watch_seconds_issue = "blank"
+  Rule 3 |   46 rows | watch_seconds over 3,600
+         action: kept row; value set to empty; watch_seconds_issue = "implausible_over_1h"
+  Rule 4 |   39 rows | completed is text True/False; some 'true' with little or no watch time
+         action: converted to true/false (reported value kept, not recalculated); completed_suspect = true where completed is true and watch_seconds < 120 or empty
+  Rule 5 |  177 rows | device_type or country blank
+         action: filled with "unknown" (device_type: 132 rows, country: 47 rows)
+
+EXAMPLE event_ids (first five per rule / flag)
+  Rule 1: EV-000002, EV-000003, EV-000012, EV-000066, EV-000082
+  Rule 2: EV-000030, EV-000466, EV-000490, EV-000551, EV-000589
+  Rule 3: EV-000045, EV-000054, EV-000152, EV-000155, EV-000200
+  Rule 4: EV-000067, EV-000597, EV-000682, EV-000683, EV-000690
+  Rule 5: EV-000037, EV-000038, EV-000129, EV-000140, EV-000202
+  pre_release_view: EV-000053, EV-000136, EV-000518, EV-000703, EV-000743
+  runtime_missing: EV-000067, EV-000073, EV-000180, EV-000239, EV-000240
+  kids_profile_mature_title: EV-000007, EV-000278, EV-000395, EV-000524, EV-000788

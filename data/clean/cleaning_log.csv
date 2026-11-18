@@ -1,0 +1,6 @@
+rule,problem,action,rows_affected
+1,"title_id not in catalog (TT-0347, TT-0412, TT-0588)",dropped row; saved to removed_events.csv with removal_reason,180
+2,watch_seconds blank,"kept row; value left empty; watch_seconds_issue = ""blank""",69
+3,"watch_seconds over 3,600","kept row; value set to empty; watch_seconds_issue = ""implausible_over_1h""",46
+4,completed is text True/False; some 'true' with little or no watch time,"converted to true/false (reported value kept, not recalculated); completed_suspect = true where completed is true and watch_seconds < 120 or empty",39
+5,device_type or country blank,"filled with ""unknown"" (device_type: 132 rows, country: 47 rows)",177
