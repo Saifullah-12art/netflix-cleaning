@@ -173,6 +173,83 @@ def join_catalog(kept, catalog):
     return flag_examples
 
 
+CUTOFF = date(2026, 11, 10)
+SPLIT_VALUES = ("train", "holdout")
+
+# Expected results for this export (17 Aug - 16 Nov 2026). The run stops if any differ.
+EXPECTED_TOTAL = 5000
+EXPECTED_KEPT, EXPECTED_REMOVED = 4820, 180
+EXPECTED_TRAIN = (4461, "2026-08-17", "2026-11-09")
+EXPECTED_HOLDOUT = (359, "2026-11-10", "2026-11-16")
+
+OUTPUT_COLS = (EVENT_COLS + ["watch_seconds_issue", "completed_suspect"] + CATALOG_COLS
+               + ["pre_release_view", "runtime_missing", "kids_profile_mature_title", "split"])
+REMOVED_COLS = EVENT_COLS + ["removal_reason"]
+LOG_COLS = ["rule", "problem", "action", "rows_affected"]
+
+
+def split(kept):
+    """Runs after all cleaning. train = before the cutoff; holdout = on/after it."""
+    for r in kept:
+        r["split"] = "train" if date.fromisoformat(r["event_datetime"]) < CUTOFF else "holdout"
+    return [r for r in kept if r["split"] == "train"], [r for r in kept if r["split"] == "holdout"]
+
+
+def run_checks(kept, removed, train, holdout):
+    def check(name, ok, detail):
+        out(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
+        if not ok:
+            fail(f"check failed: {name}")
+
+    kept_ids = {r["event_id"] for r in kept}
+    removed_ids = {r["event_id"] for r in removed}
+    check("kept + removed = 5,000", len(kept) + len(removed) == EXPECTED_TOTAL,
+          f"{len(kept):,} + {len(removed):,} = {len(kept) + len(removed):,}")
+    overlap = kept_ids & removed_ids
+    check("no event_id in both kept and removed", not overlap, f"{len(overlap)} overlapping")
+    check("4,820 kept, 180 removed",
+          (len(kept), len(removed)) == (EXPECTED_KEPT, EXPECTED_REMOVED),
+          f"{len(kept):,} kept, {len(removed):,} removed")
+
+    for name, part, (n, lo, hi) in (("train", train, EXPECTED_TRAIN),
+                                    ("holdout", holdout, EXPECTED_HOLDOUT)):
+        dates = [r["event_datetime"] for r in part]
+        got = (len(part), min(dates), max(dates)) if part else (0, None, None)
+        check(f"{name} = {n:,} rows, {lo} to {hi}", got == (n, lo, hi),
+              f"{got[0]:,} rows, {got[1]} to {got[2]}")
+
+    last_train = max(r["event_datetime"] for r in train)
+    first_holdout = min(r["event_datetime"] for r in holdout)
+    check("latest train date is before earliest holdout date", last_train < first_holdout,
+          f"{last_train} < {first_holdout}")
+
+    values = sorted({r["split"] for r in kept})
+    check('split values are exactly "train" and "holdout"', values == sorted(SPLIT_VALUES),
+          f"{values}")
+
+    train_members = {r["member_id"] for r in train}
+    train_titles = {r["title_id"] for r in train}
+    new_members = sorted({r["member_id"] for r in holdout} - train_members)
+    new_titles = sorted({r["title_id"] for r in holdout} - train_titles)
+    check("every holdout member appears in train", not new_members,
+          f"{len(new_members)} holdout-only members {new_members[:5]}")
+    check("every holdout title appears in train", not new_titles,
+          f"{len(new_titles)} holdout-only titles {new_titles[:5]}")
+
+    over = [r["event_id"] for r in kept
+            if r["watch_seconds"] and float(r["watch_seconds"]) > WATCH_SECONDS_MAX]
+    check("no watch_seconds over 3,600", not over, f"{len(over)} rows over")
+    blanks = [r["event_id"] for r in kept if r["device_type"] == "" or r["country"] == ""]
+    check("no blank device_type or country left", not blanks, f"{len(blanks)} rows blank")
+
+
+def write_csv(path, cols, rows):
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=cols, extrasaction="raise", lineterminator="\n")
+        w.writeheader()
+        w.writerows(rows)
+
+
 def main(argv):
     if len(argv) != 4:
         print(__doc__)
@@ -196,6 +273,42 @@ def main(argv):
     flag_examples = join_catalog(kept, catalog)
     out(f"Joined catalog on title_id: all {len(kept):,} kept rows matched")
 
+    train, holdout = split(kept)
+    out(f"Split at {CUTOFF}: {len(train):,} train, {len(holdout):,} holdout")
+
+    out("")
+    out("CHECKS")
+    run_checks(kept, removed, train, holdout)
+
+    write_csv(out_dir / "events_clean.csv", OUTPUT_COLS, kept)
+    write_csv(out_dir / "train.csv", OUTPUT_COLS, train)
+    write_csv(out_dir / "holdout.csv", OUTPUT_COLS, holdout)
+    write_csv(out_dir / "removed_events.csv", REMOVED_COLS, removed)
+    write_csv(out_dir / "cleaning_log.csv", LOG_COLS, log)
+    out("")
+    out(f"Wrote events_clean.csv, train.csv, holdout.csv, removed_events.csv, "
+        f"cleaning_log.csv to {out_dir.as_posix()}/")
+
+    out("")
+    out("CLEANING LOG")
+    for row in log:
+        out(f"  Rule {row['rule']} | {row['rows_affected']:>4} rows | {row['problem']}")
+        out(f"         action: {row['action']}")
+    out("")
+    out("EXAMPLE event_ids (first five per rule / flag)")
+    for row in log:
+        out(f"  Rule {row['rule']}: {', '.join(examples[row['rule']])}")
+    for flag, ids in flag_examples.items():
+        out(f"  {flag}: {', '.join(ids)}")
+
 
 if __name__ == "__main__":
-    main(sys.argv)
+    out_path = Path(sys.argv[3]) if len(sys.argv) == 4 else None
+    if out_path:
+        out_path.mkdir(parents=True, exist_ok=True)
+    try:
+        main(sys.argv)
+    finally:
+        if out_path:
+            (out_path / "run_output.txt").write_text("\n".join(out.lines) + "\n",
+                                                     encoding="utf-8")
